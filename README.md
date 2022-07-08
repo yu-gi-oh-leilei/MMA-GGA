@@ -6,13 +6,13 @@ The goal of video-based person re-identification (Re-ID) is to identify the same
 
 ## Architecture
 Overview of the proposed model. The structure of our Multi-task Multi-granularity Aggregation with Global-guided attention framework.
-![fig](images/)
+![fig](images/model.png)
 
 ## Results on MARS and iLIDS-VID:
-![fig](images/)
+![fig](images/table2.png)
 
 ## Results on DukeMTMC-VideoReID and PRID2011:
-![fig](images/)
+![fig](images/table3.png)
 
 
 
