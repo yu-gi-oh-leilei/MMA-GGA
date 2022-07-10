@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset
 import random
 
+
 def read_image(img_path):
     """Keep reading image until succeed.
     This can avoid IOError incurred by heavy IO process."""
@@ -25,9 +26,9 @@ class VideoDataset(Dataset):
     """Video Person ReID Dataset.
     Note batch data has shape (batch, seq_len, channel, height, width).
     """
-    sample_methods = ['constrain_random', 'evenly']
+    sample_methods = ['constrain_random', 'evenly','dense']
 
-    def __init__(self, dataset, seq_len=15, sample='evenly', transform=None):
+    def __init__(self, dataset, seq_len=15, sample='dense', transform=None):
         self.dataset = dataset
         self.seq_len = seq_len
         self.sample = sample
@@ -115,12 +116,40 @@ class VideoDataset(Dataset):
                 imgs_list.append(imgs)
             imgs_array = torch.stack(imgs_list)
             return imgs_array, pid, camid
+
+        elif self.sample == 'dense':
+            """
+            Sample all frames in a video into a list of clips, each clip contains seq_len frames, batch_size needs to be set to 1.
+            This sampling strategy is used in test phase.
+            """
+            cur_index=0
+            frame_indices = list(range(num))
+            indices_list=[]
+            while num-cur_index > self.seq_len:
+                indices_list.append(frame_indices[cur_index:cur_index+self.seq_len])
+                cur_index+=self.seq_len
+            last_seq=frame_indices[cur_index:]
+            for index in last_seq:
+                if len(last_seq) >= self.seq_len:
+                    break
+                last_seq.append(index)
+            indices_list.append(last_seq)
+            imgs_list=[]
+            for indices in indices_list:
+                imgs = []
+                for index in indices:
+                    index=int(index)
+                    img_path = img_paths[index]
+                    img = read_image(img_path)
+                    if self.transform is not None:
+                        img = self.transform(img)
+                    img = img.unsqueeze(0)
+                    imgs.append(img)
+                imgs = torch.cat(imgs, dim=0)
+                #imgs=imgs.permute(1,0,2,3)
+                imgs_list.append(imgs)
+            imgs_array = torch.stack(imgs_list)
+            return imgs_array, pid, camid
+
         else:
             raise KeyError("Unknown sample method: {}. Expected one of {}".format(self.sample, self.sample_methods))
-
-
-
-
-
-
-
