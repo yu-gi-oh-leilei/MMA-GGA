@@ -26,7 +26,7 @@ class VideoDataset(Dataset):
     """Video Person ReID Dataset.
     Note batch data has shape (batch, seq_len, channel, height, width).
     """
-    sample_methods = ['constrain_random', 'evenly','dense']
+    sample_methods = ['constrain_random', 'evenly','dense'，'random']
 
     def __init__(self, dataset, seq_len=15, sample='dense', transform=None):
         self.dataset = dataset
@@ -77,6 +77,38 @@ class VideoDataset(Dataset):
                 imgs.append(img)
             imgs = torch.cat(imgs, dim=0)
             return imgs, pid, camid
+
+        elif self.sample == 'random':
+            """
+            Randomly sample seq_len consecutive frames from num frames,
+            if num is smaller than seq_len, then replicate items.
+            This sampling strategy is used in training phase.
+            """
+            frame_indices = list(range(num))
+            rand_end = max(0, len(frame_indices) - self.seq_len - 1)
+            begin_index = random.randint(0, rand_end)
+            end_index = min(begin_index + self.seq_len, len(frame_indices))
+
+            indices = frame_indices[begin_index:end_index]
+
+            for index in indices:
+                if len(indices) >= self.seq_len:
+                    break
+                indices.append(index)
+            indices=np.array(indices)
+            imgs = []
+            for index in indices:
+                index=int(index)
+                img_path = img_paths[index]
+                img = read_image(img_path)
+                if self.transform is not None:
+                    img = self.transform(img)
+                img = img.unsqueeze(0)
+                imgs.append(img)
+            imgs = torch.cat(imgs, dim=0)
+            #imgs=imgs.permute(1,0,2,3)
+            return imgs, pid, camid
+
         elif self.sample == 'evenly':
             """
             Evenly sample seq_len items from num items.
@@ -153,3 +185,10 @@ class VideoDataset(Dataset):
 
         else:
             raise KeyError("Unknown sample method: {}. Expected one of {}".format(self.sample, self.sample_methods))
+
+
+
+
+
+
+
