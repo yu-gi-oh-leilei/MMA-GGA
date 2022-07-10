@@ -26,7 +26,7 @@ class VideoDataset(Dataset):
     """Video Person ReID Dataset.
     Note batch data has shape (batch, seq_len, channel, height, width).
     """
-    sample_methods = ['constrain_random', 'evenly','dense'，'random']
+    sample_methods = ['constrain_random', 'evenly','dense', 'random']
 
     def __init__(self, dataset, seq_len=15, sample='dense', transform=None):
         self.dataset = dataset
