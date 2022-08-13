@@ -62,4 +62,3 @@ def evaluate(distmat, q_pids, g_pids, q_camids, g_camids, max_rank=50):
 
     return all_cmc, mAP, mINP
 
-

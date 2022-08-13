@@ -1,4 +1,5 @@
 from __future__ import print_function, absolute_import
+import os
 import sys
 import time
 import datetime
@@ -12,6 +13,7 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
+from torch.nn import functional as F
 
 import data_manager
 from video_loader import VideoDataset
@@ -25,6 +27,8 @@ from samplers import RandomIdentitySampler
 
 parser = argparse.ArgumentParser(description='Train video model with cross entropy loss')
 # Datasets
+parser.add_argument('--dataset', type=str, default='ilidsvid',
+                    choices=data_manager.get_names())
 parser.add_argument('--train-dataset', type=str, default='ilidsvid',
                     choices=data_manager.get_names())
 parser.add_argument( '--test-dataset', type=str, default='ilidsvid',
@@ -84,6 +88,9 @@ args = parser.parse_args()
 
 
 def main():
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir, exist_ok=True)
+
     if not args.evaluate:
         sys.stdout = Logger(osp.join(args.save_dir, 'log_train.txt'))
     else:
@@ -91,6 +98,10 @@ def main():
     print("==========\nArgs:{}\n==========".format(args))
 
     use_gpu = torch.cuda.is_available()
+    if args.seed is None:
+        args.seed = random.randint(1, 10000)
+        print("Random Seed: {}".format(args.seed))
+
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -125,20 +136,20 @@ def main():
 
     # random_snip  first_snip constrain_random evenly
     trainloader = DataLoader(
-        VideoDataset(train_dataset.train, seq_len=args.seq_len, sample='constrain_random',transform=transform_train),
+        VideoDataset(train_dataset.train, seq_len=args.seq_len, sample='random',transform=transform_train),
         sampler=RandomIdentitySampler(train_dataset.train, num_instances=args.num_instances),
         batch_size=args.train_batch, num_workers=args.workers,
         pin_memory=pin_memory, drop_last=True,
     )
 
     queryloader = DataLoader(
-        VideoDataset(test_dataset.query, seq_len=args.seq_len, sample='evenly', transform=transform_test),
+        VideoDataset(test_dataset.query, seq_len=args.seq_len, sample='dense', transform=transform_test),
         batch_size=args.test_batch, shuffle=False, num_workers=args.workers,
         pin_memory=pin_memory, drop_last=False,
     )
 
     galleryloader = DataLoader(
-        VideoDataset(test_dataset.gallery, seq_len=args.seq_len, sample='evenly', transform=transform_test),
+        VideoDataset(test_dataset.gallery, seq_len=args.seq_len, sample='dense', transform=transform_test),
         batch_size=args.test_batch, shuffle=False, num_workers=args.workers,
         pin_memory=pin_memory, drop_last=False,
     )
@@ -180,7 +191,8 @@ def main():
 
     # optimizer
     optimizer = dict()
-    args.lr=0.0003
+    model.module.frozen_mma()
+    args.lr=0.00015
     optimizer['model'] = model.module.get_optimizer(args)
     optimizer['center'] = torch.optim.SGD(criterion['center'].parameters(), lr=0.5)
     
@@ -195,7 +207,7 @@ def main():
     for epoch in range(start_epoch, args.start_mma_epoch):
         
         start_train_time = time.time()
-        print('Epoch',epoch, 'lr', scheduler.get_last_lr()[0])
+        print('Epoch',epoch+1, 'lr', scheduler.get_last_lr()[0])
         train(epoch, model, criterion, optimizer, scheduler, trainloader, use_gpu)
         scheduler.step()        
         train_time += round(time.time() - start_train_time)
@@ -224,6 +236,7 @@ def main():
     elapsed = str(datetime.timedelta(seconds=elapsed))
     train_time = str(datetime.timedelta(seconds=train_time))
     print("Finished_whole_first. Total elapsed time (h:m:s): {}. Training time (h:m:s): {}.".format(elapsed, train_time))
+    print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
@@ -233,7 +246,7 @@ def main():
     # train mma network
     # optimizer
     model.module.frozen_without_mma()
-    args.lr=0.5
+    args.lr=0.025
     optimizer['model'] = model.module.get_optimizer(args)   
     # lr_scheduler
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer['model'], milestones=args.stepsize, gamma=args.gamma, last_epoch=-1)
@@ -243,7 +256,7 @@ def main():
     for epoch in range(args.start_mma_epoch, args.start_whole_epoch):
 
         start_train_time = time.time()
-        print('Epoch',epoch, 'lr', scheduler.get_last_lr()[0])
+        print('Epoch',epoch+1, 'lr', scheduler.get_last_lr()[0])
         train(epoch, model, criterion, optimizer, scheduler, trainloader, use_gpu)
         scheduler.step()        
         train_time += round(time.time() - start_train_time)
@@ -273,13 +286,16 @@ def main():
     elapsed = str(datetime.timedelta(seconds=elapsed))
     train_time = str(datetime.timedelta(seconds=train_time))
     print("Finished_MMA. Total elapsed time (h:m:s): {}. Training time (h:m:s): {}.".format(elapsed, train_time))
+    print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
 
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     # train whole network
     # optimizer
-    model.module.unfrozen_mma()
-    args.lr=0.00003
+    model.module.unfrozen_whole()
+    args.lr=0.000015
     optimizer['model'] = model.module.get_optimizer(args)
     # lr_scheduler
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer['model'], milestones=args.stepsize, gamma=args.gamma, last_epoch=-1) 
@@ -289,7 +305,7 @@ def main():
     for epoch in range(args.start_whole_epoch, args.max_epoch):
         
         start_train_time = time.time()
-        print('Epoch',epoch, 'lr', scheduler.get_last_lr()[0])
+        print('Epoch',epoch+1, 'lr', scheduler.get_last_lr()[0])
         train(epoch, model, criterion, optimizer, scheduler, trainloader, use_gpu)
         scheduler.step()        
         train_time += round(time.time() - start_train_time)
@@ -320,6 +336,7 @@ def main():
     elapsed = str(datetime.timedelta(seconds=elapsed))
     train_time = str(datetime.timedelta(seconds=train_time))
     print("Finished_whole_second. Total elapsed time (h:m:s): {}. Training time (h:m:s): {}.".format(elapsed, train_time))
+    print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
@@ -398,6 +415,8 @@ def test(model, queryloader, galleryloader, pool, use_gpu, ranks=[1, 5, 10, 20],
 
             features = features.view(n, -1)
             features = torch.mean(features, 0)
+    
+            features = F.normalize(features,p=2,dim=0)
             features = features.cpu()
             qf.append(features.numpy())
             q_pids.extend(pids.numpy())
@@ -420,6 +439,8 @@ def test(model, queryloader, galleryloader, pool, use_gpu, ranks=[1, 5, 10, 20],
             batch_time.update(time.time() - end)
             features = features.view(n, -1)
             features = torch.mean(features, 0)
+
+            features = F.normalize(features,p=2,dim=0)
             features = features.cpu()
             gf.append(features.numpy())
             g_pids.extend(pids.numpy())
@@ -428,6 +449,13 @@ def test(model, queryloader, galleryloader, pool, use_gpu, ranks=[1, 5, 10, 20],
         g_pids = np.asarray(g_pids)
         g_camids = np.asarray(g_camids)
         print("Extracted features for gallery set, obtained {}-by-{} matrix".format(gf.shape[0], gf.shape[1]))
+
+        if args.dataset == 'mars':
+            print("gallery set must contain query set, otherwise 140 query imgs will not have ground truth.")
+            gf = np.concatenate((qf, gf), axis=0)
+            g_pids = np.append(q_pids, g_pids)
+            g_camids = np.append(q_camids, g_camids)
+
 
     print("==> BatchTime(s)/BatchSize(img): {:.3f}/{}".format(batch_time.avg, args.test_batch * args.seq_len))
 

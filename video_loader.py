@@ -185,10 +185,3 @@ class VideoDataset(Dataset):
 
         else:
             raise KeyError("Unknown sample method: {}. Expected one of {}".format(self.sample, self.sample_methods))
-
-
-
-
-
-
-
